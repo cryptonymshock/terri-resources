@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Territorial IO Opening Simulator</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+        }
+        .section {
+            margin-bottom: 20px;
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 5px;
+        }
+        label {
+            display: block;
+            margin-bottom: 5px;
+        }
+        input {
+            width: 100%;
+            padding: 8px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+        }
+        button {
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #attack-list {
+            list-style-type: none;
+            padding: 0;
+        }
+        #attack-list li {
+            background: #f9f9f9;
+            padding: 10px;
+            margin-bottom: 5px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        #attack-list button {
+            background-color: #f44336;
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        #output {
+            white-space: pre-wrap;
+            background: #f4f4f4;
+            padding: 15px;
+            border-radius: 5px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: monospace;
+        }
+    </style>
+</head>
+<body>
+    <h1>Territorial IO Opening Simulator</h1>
+    
+    <div class="section">
+        <h2>Add Attacks</h2>
+        <label for="tick">Tick:</label>
+        <input type="number" id="tick" min="0" placeholder="e.g., 92">
+        
+        <label for="percent">Percent:</label>
+        <input type="number" id="percent" step="0.01" min="0" max="100" placeholder="e.g., 0.1">
+        
+        <button id="add-attack">Add Attack</button>
+        
+        <h3>Added Attacks:</h3>
+        <ul id="attack-list"></ul>
+    </div>
+    
+    <div class="section">
+        <h2>Simulation Settings</h2>
+        <label for="max-ticks">Max Ticks (default 500):</label>
+        <input type="number" id="max-ticks" min="1" value="500">
+        
+        <label for="verbosity">Verbosity (0=none, 1=key events, 2=detailed, default 1):</label>
+        <input type="number" id="verbosity" min="0" max="2" value="1">
+        
+        <button id="run-sim">Run Simulation</button>
+    </div>
+    
+    <div class="section">
+        <h2>Output</h2>
+        <div id="output"></div>
+    </div>
+
+    <script>
+        class OpeningSim {
+            constructor(openingAttacks, verbosity = 0) {
+                this.landValues = Array.from({ length: 100 }, (_, n) => 2 * n * (n - 1));
+                this.attackPenaltyRate = 12 / 1024;
+                this.attackLengthThresholds = [[10000, 2], [1104, 3], [0, 4]];
+
+                this.verbosity = verbosity;
+                this.tick = 0;
+                this.layerIndex = 3;
+                this.land = this.landValues[this.layerIndex];
+                this.troops = 512;
+
+                this.isNewAttack = false;
+                this.currentLandAttack = 0;
+                this.currentAttackTimeLeft = -1; // -1 means no attack is active right now
+
+                this.openingAttacks = openingAttacks;
+                this.attackIndex = 0;
+                this.nextAttack = this.openingAttacks.length > 0 ? this.openingAttacks[this.attackIndex] : null;
+
+                this.outputLog = [];
+            }
+
+            DispStats(...args) {
+                const kwargs = args.pop() || {}; // Assume last arg is kwargs object if present
+                if (this.verbosity < 1) return;
+                let output = `tick ${this.tick.toString().padStart(4)} land ${this.land.toString().padStart(5)} troops ${this.troops.toString().padStart(5)} `;
+                let msgs = args.join(' ');
+                let ctx = Object.entries(kwargs).map(([k, v]) => `${k} ${v}`).join(' ');
+                this.outputLog.push(`${output}${msgs} ${ctx}`.trim());
+            }
+
+            StartAttack(percentage) {
+                const penalty = Math.floor(this.troops * this.attackPenaltyRate);
+                const attackAmount = Math.floor(this.troops * percentage / 100);
+                this.currentLandAttack += attackAmount;
+                this.troops -= (attackAmount + penalty);
+
+                if (this.currentAttackTimeLeft === -1) {
+                    this.isNewAttack = true;
+                    this.currentAttackTimeLeft = 7; // always takes 7 ticks for the first layer of a new attack
+                }
+
+                if (this.verbosity >= 2) {
+                    this.DispStats({ "troops out": this.currentLandAttack });
+                }
+            }
+
+            AdvanceLayer(remainingTroops) {
+                this.layerIndex += 1;
+                this.land = this.landValues[this.layerIndex];
+                this.currentLandAttack = remainingTroops;
+                let duration = this.attackLengthThresholds.find(([t]) => this.land >= t)?.[1] || 4;
+                this.currentAttackTimeLeft = duration - 1;
+                if (this.verbosity >= 2) {
+                    this.DispStats({ "troops out": this.currentLandAttack });
+                }
+            }
+
+            Run(maxTicks = 500) {
+                this.outputLog = [];
+                if (this.verbosity >= 1) this.DispStats();
+                for (this.tick = 0; this.tick <= maxTicks; this.tick++) {
+                    if (this.troops < 0) { // failure check for optimizer
+                        return [this.land, false];
+                    }
+                    // interest decreases linearly from 1.07 to 1.01 over the first 1920 ticks
+                    const interest = Math.round(10000 * Math.max((1.07 - this.tick * (0.06 / 1920)), 1.01)) / 10000;
+
+                    if (this.tick > 0 && this.tick % 10 === 0) {
+                        this.troops += Math.max(Math.floor(this.troops * (interest - 1)), 1);
+                        if (this.tick % 100 === 0) {
+                            this.troops += this.land;
+                            if (this.verbosity >= 1) {
+                                this.outputLog.push("\nCYCLE");
+                                this.DispStats();
+                            }
+                        } else if (this.verbosity >= 2) {
+                            this.DispStats();
+                        }
+                    }
+                    if (this.nextAttack && this.tick === this.nextAttack[0]) {
+                        if (this.verbosity >= 1) this.outputLog.push(`ATTACK ${this.nextAttack[1]}`);
+                        this.StartAttack(this.nextAttack[1]);
+                        this.attackIndex += 1;
+                        this.nextAttack = this.attackIndex < this.openingAttacks.length ? this.openingAttacks[this.attackIndex] : null;
+                    }
+                    if (this.currentAttackTimeLeft >= 0) {
+                        if (this.currentAttackTimeLeft === 0) {
+                            const troopsNeeded = 8 * this.layerIndex;
+                            if (this.currentLandAttack >= 1.5 * troopsNeeded) {
+                                this.AdvanceLayer(this.currentLandAttack - troopsNeeded);
+                            } else if (this.isNewAttack) {
+                                this.troops -= (Math.round(1.5 * troopsNeeded) - this.currentLandAttack);
+                                this.AdvanceLayer(Math.round(troopsNeeded / 2));
+                            } else {
+                                this.troops += this.currentLandAttack;
+                                this.currentLandAttack = 0;
+                                if (this.verbosity >= 1) this.DispStats(" end of attack");
+                                this.currentAttackTimeLeft -= 1;
+                            }
+                            this.isNewAttack = false;
+                        } else {
+                            this.currentAttackTimeLeft -= 1;
+                        }
+                    }
+                }
+                return [this.land, this.troops >= 0];
+            }
+
+            getOutput() {
+                return this.outputLog.join('\n');
+            }
+        }
+
+        // UI Logic
+        const attackList = document.getElementById('attack-list');
+        const addAttackBtn = document.getElementById('add-attack');
+        const runSimBtn = document.getElementById('run-sim');
+        const outputDiv = document.getElementById('output');
+
+        let attacks = [];
+
+        addAttackBtn.addEventListener('click', () => {
+            const tick = parseInt(document.getElementById('tick').value);
+            const percent = parseFloat(document.getElementById('percent').value);
+            if (isNaN(tick) || isNaN(percent) || tick < 0 || percent < 0 || percent > 100) {
+                alert('Invalid tick or percent. Tick must be >=0, percent between 0 and 100.');
+                return;
+            }
+            attacks.push([tick, percent]);
+            attacks.sort((a, b) => a[0] - b[0]);
+            renderAttackList();
+            document.getElementById('tick').value = '';
+            document.getElementById('percent').value = '';
+        });
+
+        function renderAttackList() {
+            attackList.innerHTML = '';
+            attacks.forEach((attack, index) => {
+                const li = document.createElement('li');
+                li.textContent = `Tick: ${attack[0]}, Percent: ${attack[1]}`;
+                const removeBtn = document.createElement('button');
+                removeBtn.textContent = 'Remove';
+                removeBtn.addEventListener('click', () => {
+                    attacks.splice(index, 1);
+                    renderAttackList();
+                });
+                li.appendChild(removeBtn);
+                attackList.appendChild(li);
+            });
+        }
+
+        runSimBtn.addEventListener('click', () => {
+            const maxTicks = parseInt(document.getElementById('max-ticks').value) || 500;
+            const verbosity = parseInt(document.getElementById('verbosity').value) || 1;
+
+            const sim = new OpeningSim(attacks, verbosity);
+            const [finalLand, success] = sim.Run(maxTicks);
+            let log = sim.getOutput();
+            log += `\n\nSimulation complete. Final land: ${finalLand}, Success: ${success}`;
+            outputDiv.textContent = log;
+        });
+    </script>
+</body>
+</html>
