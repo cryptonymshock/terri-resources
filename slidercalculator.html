@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Territorial IO Slider Calculator (W/S/A/D keys)</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 700px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f9f9f9;
+        }
+        h1 {
+            text-align: center;
+            color: #333;
+        }
+        .section {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        .big-display {
+            font-size: 48px;
+            font-weight: bold;
+            text-align: center;
+            padding: 20px;
+            background: #eef;
+            border-radius: 8px;
+            margin: 20px 0;
+            color: #006;
+        }
+        .buttons {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 15px;
+            margin: 20px 0;
+        }
+        button {
+            padding: 20px;
+            font-size: 24px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+        }
+        button:hover { opacity: 0.9; }
+        .w { background: #4CAF50; color: white; } /* up */
+        .s { background: #f44336; color: white; } /* down */
+        .a { background: #2196F3; color: white; } /* left */
+        .d { background: #FF9800; color: white; } /* right */
+        .reset { background: #9E9E9E; color: white; grid-column: span 4; }
+        .controls {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 10px;
+        }
+        input {
+            padding: 10px;
+            font-size: 16px;
+            width: 120px;
+        }
+        .info {
+            font-size: 14px;
+            color: #555;
+            margin-top: 10px;
+        }
+        .sequence {
+            margin-top: 10px;
+            padding: 10px;
+            background: #f0f0f0;
+            border-radius: 4px;
+            min-height: 20px;
+        }
+    </style>
+</head>
+<body>
+    <h1>Territorial IO Slider Calculator</h1>
+    <div class="section">
+        <div class="controls">
+            <label>Initial %:</label>
+            <input type="number" id="initial" value="50" step="0.0001" min="0" max="100">
+            <button onclick="setInitial()">Set</button>
+        </div>
+
+        <div class="big-display" id="display">50.0000</div>
+
+        <div class="buttons">
+            <button class="w" onclick="press('W')">W<br><small>×8/7</small></button>
+            <button class="s" onclick="press('S')">S<br><small>×7/8</small></button>
+            <button class="a" onclick="press('A')">A<br><small>×31/32</small></button>
+            <button class="d" onclick="press('D')">D<br><small>×32/31</small></button>
+            <button class="reset" onclick="resetCalc()">RESET</button>
+        </div>
+
+        <div class="info">
+            Sequence so far: <span id="sequence" class="sequence"></span>
+        </div>
+        <div class="info">
+            Net W-S: <span id="net-ws">0</span>  Net fine adj (inc - dec): <span id="net-ad">0</span><br>
+            Exact value: <span id="exact"></span>
+        </div>
+    </div>
+
+    <script>
+        let current = 50;
+        let initial = 50;
+        let sequence = [];
+        let exp2 = 0;      // net power of 2
+        let exp7 = 0;      // net power of 7
+        let exp31 = 0;     // net power of 31
+
+        const display = document.getElementById('display');
+        const seqEl = document.getElementById('sequence');
+        const netWs = document.getElementById('net-ws');
+        const netAd = document.getElementById('net-ad');
+        const exactEl = document.getElementById('exact');
+
+        function updateDisplay() {
+            display.textContent = current.toFixed(6);
+            
+            // net WS
+            const netW = exp7 < 0 ? -exp7 : 0;
+            const netS = exp7 > 0 ? exp7 : 0;
+            netWs.textContent = (netW - netS);
+
+            // net fine (inc - dec)
+            const netInc = exp31 < 0 ? -exp31 : 0; // number of increases (D's)
+            const netDec = exp31 > 0 ? exp31 : 0; // number of decreases (A's)
+            netAd.textContent = (netInc - netDec);
+
+            // exact fraction string (simplified)
+            let num = 1n;
+            let den = 1n;
+            if (exp2 > 0) num *= 2n ** BigInt(exp2);
+            else if (exp2 < 0) den *= 2n ** BigInt(-exp2);
+            if (exp7 > 0) num *= 7n ** BigInt(exp7);
+            else if (exp7 < 0) den *= 7n ** BigInt(-exp7);
+            if (exp31 > 0) num *= 31n ** BigInt(exp31);
+            else if (exp31 < 0) den *= 31n ** BigInt(-exp31);
+
+            const sign = num < 0n ? '-' : '';
+            exactEl.textContent = `${sign}${num}/${den} × initial`;
+        }
+
+        function press(key) {
+            sequence.push(key);
+            seqEl.textContent = sequence.join('').slice(-30) + (sequence.length > 30 ? '...' : '');
+
+            if (key === 'W') {
+                current *= 8 / 7;
+                exp2 += 3;
+                exp7 -= 1;
+            } else if (key === 'S') {
+                current *= 7 / 8;
+                exp2 -= 3;
+                exp7 += 1;
+            } else if (key === 'A') {
+                current *= 31 / 32;
+                exp2 -= 5;
+                exp31 += 1;
+            } else if (key === 'D') {
+                current *= 32 / 31;
+                exp2 += 5;
+                exp31 -= 1;
+            }
+
+            // clamp to 0-100
+            if (current < 0) current = 0;
+            if (current > 100) current = 100;
+
+            updateDisplay();
+        }
+
+        function setInitial() {
+            const val = parseFloat(document.getElementById('initial').value);
+            if (!isNaN(val)) {
+                initial = Math.max(0, Math.min(100, val));
+                resetCalc(false); // reset without clearing exponents
+                current = initial;
+                updateDisplay();
+            }
+        }
+
+        function resetCalc(clearSequence = true) {
+            current = initial;
+            if (clearSequence) {
+                sequence = [];
+                seqEl.textContent = '';
+                exp2 = 0;
+                exp7 = 0;
+                exp31 = 0;
+            }
+            updateDisplay();
+        }
+
+        // Keyboard support
+        document.addEventListener('keydown', (e) => {
+            const key = e.key.toUpperCase();
+            if ('WASD'.includes(key)) {
+                press(key);
+            }
+        });
+
+        // init
+        updateDisplay();
+    </script>
+</body>
+</html>
