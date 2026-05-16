@@ -75,6 +75,14 @@
             border-radius: 4px;
             min-height: 20px;
         }
+        .path-result {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background: #e8f5e9;
+            border-radius: 4px;
+            word-break: break-all;
+        }
     </style>
 </head>
 <body>
@@ -90,7 +98,7 @@
             <input type="number" id="target" value="50" step="0.0001" min="0" max="100">
             <button onclick="findPath()">Find Path</button>
         </div>
-        <div class="info" id="pathResult" style="display:none; margin-top: 10px; padding: 10px; background: #e8f5e9; border-radius: 4px;">
+        <div class="path-result" id="pathResult">
             <strong>Path:</strong> <span id="pathSequence"></span><br>
             <span id="pathStats"></span>
         </div>
@@ -109,7 +117,7 @@
             Sequence so far: <span id="sequence" class="sequence"></span>
         </div>
         <div class="info">
-            Net W-S: <span id="net-ws">0</span>  Net fine adj (inc - dec): <span id="net-ad">0</span><br>
+            Net W-S: <span id="net-ws">0</span>  Net fine adj (inc - dec): <span id="net-ad">0</span><br>
             Exact value: <span id="exact"></span>
         </div>
     </div>
@@ -194,71 +202,72 @@
             }
         }
 
-        function resetCalc(clearSequence = true) {
-           function findPath() {
-    const target = parseFloat(document.getElementById('target').value);
-    if (isNaN(target) || target < 0 || target > 100) {
-        alert('Please enter a valid target between 0 and 100');
-        return;
-    }
-
-    // Work in log space: current = initial * 2^a * 7^b * 31^c
-    // log(current/initial) = a*log(2) + b*log(7) + c*log(31)
-    const ratio = target / initial;
-    const targetLog = Math.log(ratio);
-    
-    const log2 = Math.log(2);
-    const log7 = Math.log(7);
-    const log31 = Math.log(31);
-    
-    // W: *= 8/7  → a+3, b-1  → log += 3*log(2) - log(7)
-    // S: *= 7/8  → a-3, b+1  → log -= 3*log(2) - log(7)
-    // A: *= 31/32 → a-5, c+1  → log -= 5*log(2) - log(31)
-    // D: *= 32/31 → a+5, c-1  → log += 5*log(2) - log(31)
-    
-    const logW = 3*log2 - log7;
-    const logS = -logW;
-    const logA = -5*log2 + log31;
-    const logD = -logA;
-    
-    // Greedy approach: pick the key that gets us closest
-    let currentLog = 0;
-    let sequence = [];
-    
-    for (let i = 0; i < 100; i++) {
-        const diff = targetLog - currentLog;
-        if (Math.abs(diff) < 0.001) break; // within 0.1%
-        
-        // Pick key that reduces distance most
-        const options = [
-            { key: 'W', log: logW },
-            { key: 'S', log: logS },
-            { key: 'A', log: logA },
-            { key: 'D', log: logD }
-        ];
-        
-        let best = options[0];
-        let bestDiff = Math.abs(diff - best.log);
-        
-        for (const opt of options) {
-            const newDiff = Math.abs(diff - opt.log);
-            if (newDiff < bestDiff) {
-                bestDiff = newDiff;
-                best = opt;
+        function findPath() {
+            const target = parseFloat(document.getElementById('target').value);
+            if (isNaN(target) || target < 0 || target > 100) {
+                alert('Please enter a valid target between 0 and 100');
+                return;
             }
+
+            // Work in log space: current = initial * 2^a * 7^b * 31^c
+            // log(current/initial) = a*log(2) + b*log(7) + c*log(31)
+            const ratio = target / initial;
+            const targetLog = Math.log(ratio);
+            
+            const log2 = Math.log(2);
+            const log7 = Math.log(7);
+            const log31 = Math.log(31);
+            
+            // W: *= 8/7  → a+3, b-1  → log += 3*log(2) - log(7)
+            // S: *= 7/8  → a-3, b+1  → log -= 3*log(2) - log(7)
+            // A: *= 31/32 → a-5, c+1  → log -= 5*log(2) - log(31)
+            // D: *= 32/31 → a+5, c-1  → log += 5*log(2) - log(31)
+            
+            const logW = 3*log2 - log7;
+            const logS = -logW;
+            const logA = -5*log2 + log31;
+            const logD = -logA;
+            
+            // Greedy approach: pick the key that gets us closest
+            let currentLog = 0;
+            let resultSequence = [];
+            
+            for (let i = 0; i < 100; i++) {
+                const diff = targetLog - currentLog;
+                if (Math.abs(diff) < 0.001) break; // within 0.1%
+                
+                // Pick key that reduces distance most
+                const options = [
+                    { key: 'W', log: logW },
+                    { key: 'S', log: logS },
+                    { key: 'A', log: logA },
+                    { key: 'D', log: logD }
+                ];
+                
+                let best = options[0];
+                let bestDiff = Math.abs(diff - best.log);
+                
+                for (const opt of options) {
+                    const newDiff = Math.abs(diff - opt.log);
+                    if (newDiff < bestDiff) {
+                        bestDiff = newDiff;
+                        best = opt;
+                    }
+                }
+                
+                resultSequence.push(best.key);
+                currentLog += best.log;
+            }
+            
+            const resultValue = initial * Math.exp(currentLog);
+            const pathEl = document.getElementById('pathResult');
+            document.getElementById('pathSequence').textContent = resultSequence.join('');
+            document.getElementById('pathStats').textContent = 
+                `Result: ${resultValue.toFixed(4)}% (error: ${Math.abs(resultValue - target).toFixed(6)}%)`;
+            pathEl.style.display = 'block';
         }
-        
-        sequence.push(best.key);
-        currentLog += best.log;
-    }
-    
-    const resultValue = initial * Math.exp(currentLog);
-    const pathEl = document.getElementById('pathResult');
-    document.getElementById('pathSequence').textContent = sequence.join('');
-    document.getElementById('pathStats').textContent = 
-        `Result: ${resultValue.toFixed(4)}% (error: ${Math.abs(resultValue - target).toFixed(6)}%)`;
-    pathEl.style.display = 'block';
-}
+
+        function resetCalc(clearSequence = true) {
             current = initial;
             if (clearSequence) {
                 sequence = [];
